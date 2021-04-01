@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: my-webserver
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+   - http:
+      paths:
+       - path: /
+         backend:
+          serviceName: rocket-svc
+          servicePort: 3000

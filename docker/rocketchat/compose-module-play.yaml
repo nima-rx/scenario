@@ -1,0 +1,17 @@
+---
+
+- hosts: docker
+  tasks:
+     - name: transfer files
+       synchronize:
+        src: /root/docker/rocketchat
+        dest: /usr/local/src/
+       notify: run compose services
+  
+  handlers:
+     - name: run compose services
+       docker_compose:
+           project_src: /usr/local/src/rocketchat/
+           state: present
+
+       

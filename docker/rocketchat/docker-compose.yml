@@ -1,0 +1,58 @@
+version: '3.7'
+ 
+services:
+   mongo:
+     image: mongo:4
+     container_name: mongo
+     restart: unless-stopped
+     command: mongod --oplogSize 128 --replSet rs0
+     volumes:
+       - mongodb:/data/db
+     networks:
+       - chatnet
+
+   mongo-init-replica:
+     image: mongo:4
+     container_name: mongo_replica
+     restart: on-failure
+     command: 'mongo mongo/rocketchat --eval "printjson(rs.initiate())"'
+     depends_on:
+      - mongo
+     networks:
+      - chatnet
+
+   rocket:
+     image: rocketchat/rocket.chat:latest
+     depends_on:
+      - mongo
+     scale: 2
+     volumes:
+      - rocketchat:/app/uploads
+     restart: unless-stopped
+     environment:
+      - PORT=3000
+      - ROOT_URL=http://185.208.175.112
+      - MONGO_URL=mongodb://mongo:27017/rocketchat
+      - MONGO_OPLOG_URL=mongodb://mongo:27017/local?replSet=rs0
+     networks:
+      - chatnet
+
+   proxy:
+    image: nginx
+    container_name: proxy
+    restart: on-failure
+    ports:
+     - "80:80"
+    volumes:
+     - ./default.conf:/etc/nginx/conf.d/default.conf
+    networks:
+     - chatnet
+
+volumes:
+  mongodb:
+  rocketchat:
+
+networks:
+  chatnet:
+    driver: bridge
+

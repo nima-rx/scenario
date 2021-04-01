@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rocket-svc
+  labels:
+    app: rocket-svc
+spec:
+  type: ClusterIP
+  ports:
+        - port: 3000
+          targetPort: 3000
+  selector:
+    app: rocketchat-server

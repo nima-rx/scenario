@@ -1,0 +1,193 @@
+---
+
+- hosts: kuber
+  tasks:
+     - name: creating persistent volume
+       k8s:
+        state: present
+        definition:
+         apiVersion: v1
+         kind: PersistentVolume
+         metadata:
+          name: my-pv
+          labels:
+            name: my-pv
+         spec:
+          accessModes:
+           - ReadWriteOnce
+          capacity:
+             storage: 5Gi
+          hostPath:
+             path: /data
+
+     - name: creating persistent volume claim
+       k8s:
+        state: present
+        definition:
+         apiVersion: v1
+         kind: PersistentVolumeClaim
+         metadata:
+          name: mongo-pvc
+          namespace: default
+         spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 4Gi
+
+     - name: creating mongo statefulset
+       k8s:
+        state: present
+        definition:
+         apiVersion: apps/v1
+         kind: StatefulSet
+         metadata:
+          name: rocket-mongodb
+          namespace: default
+         spec:
+          serviceName: "mongo-svc"
+          replicas: 1
+          template:
+            metadata:
+             labels:
+                app: rocket-mongodb
+            spec:
+              terminationGracePeriodSeconds: 10
+              containers:
+               - name: mongodb
+                 image: mongo:4
+                 ports:
+                  - containerPort: 27017
+                 command: ["mongod"]
+                 args: ["--oplogSize","128","--replSet","rs0","--bind_ip_all"]
+                 volumeMounts:
+                 - name: mongo-storage
+                   mountPath: /data/db
+              volumes:
+                - name: mongo-storage
+                  persistentVolumeClaim:
+                     claimName: mongo-pvc
+              nodeSelector:
+                  app: rocketchat
+          selector:
+            matchLabels:
+              app: rocket-mongodb
+ 
+     - name: creating mongo service
+       k8s:
+        state: present
+        definition:
+         apiVersion: v1
+         kind: Service
+         metadata:
+          name: mongo-svc
+          namespace: default
+          labels:
+            app: mongo-svc
+         spec:
+          clusterIP: None
+          ports:
+            - port: 27017
+              targetPort: 27017
+          selector:
+            app: rocket-mongodb
+ 
+     - name: creating mongo job 
+       k8s:
+        state: present
+        definition:
+         apiVersion: batch/v1
+         kind: Job
+         metadata:
+          name: mongo-replica
+          namespace: default
+         spec:
+          template:
+            metadata:
+              name: mongo-replica
+            spec:
+              containers:
+               - name: mongo-replica
+                 image: mongo:4
+                 command: ["bash"]
+                 args: ["-c", "mongo mongo-svc:27017/rocketchat --eval \"printjson(rs.initiate())\""]
+              nodeSelector:
+                  app: rocketchat
+              restartPolicy: Never
+
+     - name: creating rocketchat deployment
+       k8s:
+        state: present
+        definition:
+         apiVersion: apps/v1
+         kind: Deployment
+         metadata:
+          name: rocketchat-deploy
+          namespace: default
+          labels:
+            app: rocketchat-server
+         spec:
+          template:
+            metadata:
+              labels:
+                app: rocketchat-server
+            spec:
+              containers:
+               - name: rocketchat-server
+                 image: rocketchat/rocket.chat:latest
+                 env:
+                  - name: PORT
+                    value: "3000"
+                  - name: ROOT_URL
+                    value: "http://195.248.243.243"
+                  - name: MONGO_URL
+                    value: "mongodb://mongo-svc:27017/rocketchat"
+                  - name: MONGO_OPLOG_URL
+                    value: "mongodb://mongo-svc:27017/local?replSet=rs0"
+                 ports:
+                  - containerPort: 3000
+          replicas: 2
+          selector:
+            matchLabels:
+              app: rocketchat-server
+
+     - name: creating rocketchat service
+       k8s:
+        state: present
+        definition:
+         apiVersion: v1
+         kind: Service
+         metadata:
+          name: rocket-svc
+          namespace: default
+          labels:
+            app: rocket-svc
+         spec:
+          type: ClusterIP
+          ports:
+           - port: 3000
+             targetPort: 3000
+          selector:
+             app: rocketchat-server    
+
+     - name: creating ingress resource
+       k8s:
+        state: present
+        definition:
+         apiVersion: networking.k8s.io/v1beta1
+         kind: Ingress
+         metadata:
+          name: my-webserver
+          namespace: default
+          annotations:
+            kubernetes.io/ingress.class: nginx
+         spec:
+          rules:
+           - http:
+              paths:
+               - path: /
+                 backend:
+                  serviceName: rocket-svc
+                  servicePort: 3000
+

@@ -1,0 +1,83 @@
+---
+
+- hosts: docker
+  tasks:
+     - name: creating directory
+       file:
+         path: /root/rocketchat/
+         state: directory
+
+     - name: transfer files
+       copy:
+         src: ./default.conf
+         dest: /root/rocketchat/default.conf
+
+     - name: create network
+       docker_network:
+         name: chatnet
+         driver: bridge
+         state: present
+         
+     - name: create database volume
+       docker_volume:
+         name: mongo_files
+         state: present
+ 
+     - name: create rocketchat volume
+       docker_volume:
+         name: rocketchat_files
+         state: present
+     
+     - name: create mongo service
+       docker_container:
+         name: mongo
+         image: mongo:4
+         restart_policy: unless-stopped
+         command: mongod --oplogSize 128 --replSet rs0
+         volumes:
+           - mongo_files:/data/db
+         networks:
+           - name: chatnet
+         state: started
+
+     - name: create mongo replica
+       docker_container:
+         name: mongo_replica
+         image: mongo:4
+         restart_policy: on-failure
+         command: 'mongo mongo/rocketchat --eval "printjson(rs.initiate())"'
+         networks:
+           - name: chatnet
+         state: started
+
+
+     - name: create rocketchat service
+       docker_container:
+         name: rocket
+         image: rocketchat/rocket.chat:latest
+         volumes:
+           - rocketchat_files:/app/uploads
+         restart_policy: unless-stopped
+         env:
+           PORT=3000
+           ROOT_URL=http://185.208.175.112
+           MONGO_URL=mongodb://mongo:27017/rocketchat
+           MONGO_OPLOG_URL=mongodb://mongo:27017/local?replSet=rs0
+         networks:
+           - name: chatnet
+         state: started
+
+     
+     - name: create proxy service
+       docker_container:
+         name: proxy
+         image: nginx
+         restart_policy: on-failure
+         ports:
+           - "80:80"
+         volumes:
+           - /root/rocketchat/default.conf:/etc/nginx/conf.d/default.conf
+         networks:
+           - name: chatnet
+         state: started
+
